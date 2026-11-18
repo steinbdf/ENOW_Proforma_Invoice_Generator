@@ -389,7 +389,7 @@ footer.foot{font-size:12px; color:var(--fg-muted); text-align:center; padding-to
     const footerLines = lines.filter(l => /TERMS\s*(AND|&)\s*CONDITIONS|^WWW\.|HTTPS?:\/\//i.test(l.text));
     const billBlock = detectAddressBlock(lines, billLabel, 85);
     const shipBlock = detectAddressBlock(lines, shipLabel, 85);
-    return { title, banner, billLabel, shipLabel, totalsLines, footerLines, billBlock, shipBlock, width, height };
+    return { title, banner, billLabel, shipLabel, totalsLines, footerLines, billBlock, shipBlock, width, height, allLines: lines };
   }
 
   function logoBboxFor(title, pageHeight) {
@@ -698,16 +698,36 @@ footer.foot{font-size:12px; color:var(--fg-muted); text-align:center; padding-to
 
       // Wire instructions (last page only)
       if (idx === pages.length - 1) {
-        const stopYs = [];
-        if (det.banner) stopYs.push(det.banner.y);
-        if (det.footerLines) stopYs.push(...det.footerLines.map(l => l.y));
-        if (det.totalsLines) stopYs.push(...det.totalsLines.map(l => l.y));
-        let wireTop = stopYs.length ? Math.min(...stopYs) - 30 : 170;
-        wireTop = Math.max(wireTop, 150);
+        // Scan every real line of text between the banner (or title, if no
+        // banner) and the bottom margin, and place the wire block below the
+        // LOWEST one actually found -- rather than guessing a fixed gap below
+        // a specific keyword, which breaks on templates with tight footer
+        // spacing. Small boilerplate stamps (doc/revision codes) are ignored
+        // since the wire block has always sat above those, not below them.
+        const REV_STAMP = /^\d[\d.]*\s*-\s*\d{1,2}\/\d{1,2}\/\d{1,2}|^REV\s*\d+$/i;
+        const scanTop = det.banner ? det.banner.y : (det.title ? det.title.y - 40 : Infinity);
+        const scanBottom = 25;
+        const contentBelow = (det.allLines || []).filter(l =>
+          l.y < scanTop && l.y > scanBottom && l.text && !REV_STAMP.test(l.text)
+        );
 
-        page.drawText('Wire Transfer / ACH Payment Instructions:', {
-          x: 36, y: wireTop, size: 10, font: helvBold, color: rgb(0, 0, 0),
-        });
+        let stopY;
+        if (contentBelow.length) {
+          stopY = Math.min(...contentBelow.map(l => l.y));
+        } else if (det.banner) {
+          stopY = det.banner.y;
+        } else if (det.totalsLines && det.totalsLines.length) {
+          stopY = Math.min(...det.totalsLines.map(l => l.y));
+        } else {
+          stopY = 200;
+        }
+
+        // Compact block metrics (kept small deliberately -- some templates
+        // leave very little blank space between the footer text and the
+        // bottom margin, and a tight block is far less noticeable than
+        // overlapping existing text).
+        const WIRE_GAP_AFTER_HEADING = 13;
+        const WIRE_LINE_HEIGHT = 10.5;
         const wireLines = [
           'When sending payment via wire transfer/ACH, please include the Electrical.com invoice/sales order/quotation',
           'number or your purchase order number in the memo of your payment.',
@@ -718,10 +738,22 @@ footer.foot{font-size:12px; color:var(--fg-muted); text-align:center; padding-to
           'Routing #: 102001017',
           'SWIFT Code: CHASUS33',
         ];
-        let y = wireTop - 16;
+        const blockHeight = WIRE_GAP_AFTER_HEADING + (wireLines.length - 1) * WIRE_LINE_HEIGHT;
+        const pageBottomMargin = 20;
+
+        let wireTop = stopY - 14; // small, deliberate clearance below real content
+        // Never let the block run off the physical bottom of the page --
+        // but this floor is based on how tall the block actually is, not a
+        // fixed guess, so it only kicks in when space is genuinely too tight.
+        wireTop = Math.max(wireTop, pageBottomMargin + blockHeight);
+
+        page.drawText('Wire Transfer / ACH Payment Instructions:', {
+          x: 36, y: wireTop, size: 9, font: helvBold, color: rgb(0, 0, 0),
+        });
+        let y = wireTop - WIRE_GAP_AFTER_HEADING;
         for (const line of wireLines) {
-          page.drawText(line, { x: 36, y, size: 9, font: helv, color: rgb(0, 0, 0) });
-          y -= 12.5;
+          page.drawText(line, { x: 36, y, size: 8, font: helv, color: rgb(0, 0, 0) });
+          y -= WIRE_LINE_HEIGHT;
         }
       }
     });
